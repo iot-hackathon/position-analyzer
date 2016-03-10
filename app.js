@@ -58,74 +58,82 @@ appClient.on("connect", function () {
  * captures the device events, aka. temperature readings, periodically and stores
  * them in the cloudant database.
  */
- var count = 0;
  var buffer = new Array();
  var currentlyInBuffer = new Array();
-appClient.on("deviceEvent", function (deviceType, deviceId, eventType, format, payload, topic) {
+ appClient.on("deviceEvent", function (deviceType, deviceId, eventType, format, payload, topic) {
 
     console.log("Device Event from :: "+deviceType+" : "+deviceId+" of event "+eventType+" with payload : "+payload);
 
-    var payloaddata = JSON.parse(payload);
-    var timestamp = payloaddata.Time.timestamp;
-    var micId = payloaddata.Id.microphoneId;
-    var amplitude = payloaddata.Microphone.stream;
+    if (payload) {
+      var payloaddata = JSON.parse(payload);
+      if (payloaddata && payloaddata.Time && payloaddata.Time.timestamp && payloaddata.Id && payloaddata.Id.microphoneId && payloaddata.Microphone && payloaddata.Microphone.stream) {
+        var timestamp = payloaddata.Time.timestamp;
+        var micId = payloaddata.Id.microphoneId;
+        var amplitude = payloaddata.Microphone.stream;
 
-    if (currentlyInBuffer.indexOf([timestamp / 10]) > -1) {
-      buffer[currentlyInBuffer.indexOf([timestamp / 10])] = [];
-      buffer[currentlyInBuffer.indexOf([timestamp / 10])][micId] = amplitude;
-      if (buffer[currentlyInBuffer.indexOf([timestamp / 10])].length >= 3) {
-        // Go to analysis
-        buffer.splice(buffer.indexOf([timestamp / 10]), 1);
+        if (currentlyInBuffer.indexOf([timestamp / 10]) > -1) {
+          buffer[currentlyInBuffer.indexOf([timestamp / 10])] = [];
+          buffer[currentlyInBuffer.indexOf([timestamp / 10])][micId] = amplitude;
+          if (buffer[currentlyInBuffer.indexOf([timestamp / 10])].length >= 3) {
+            // Go to analysis
+            analysis(timestamp);
+            buffer.splice(buffer.indexOf([timestamp / 10]), 1);
+          }
+        }
+        else {
+          // analysis(timestamp);
+          if (buffer.length >= 5) {
+            // Buffer full, delete first entry
+            buffer.splice(0, 1);
+            currentlyInBuffer.splice(0, 1);
+          }
+          if (!buffer[0]) {
+            index = 0;
+          }
+          else if (!buffer[1]) {
+            index = 1;
+          }
+          else if (!buffer[2]) {
+            index = 2;
+          }
+          else if (!buffer[3]) {
+            index = 3;
+          }
+          else if (!buffer[4]) {
+            index = 4;
+          }
+          else {
+            index = 5;
+          }
+          currentlyInBuffer[index] = timestamp / 10;
+          buffer[index] = [];
+          buffer[index][micId] = amplitude;
+        }
       }
-    }
-    else {
-      if (buffer.length >= 5) {
-        // Buffer full, delete first entry
-        buffer.splice(0, 1);
-        currentlyInBuffer.splice(0, 1);
-      }
-      if (!buffer[0]) {
-        index = 0;
-      }
-      else if (!buffer[1]) {
-        index = 1;
-      }
-      else if (!buffer[2]) {
-        index = 2;
-      }
-      else if (!buffer[3]) {
-        index = 3;
-      }
-      else if (!buffer[4]) {
-        index = 4;
-      }
-      else {
-        index = 5;
-      }
-      currentlyInBuffer[index] = timestamp / 10;
-      buffer[index] = [];
-      buffer[index][micId] = amplitude;
     }
 });
 
-function analysis() {
+var count = 0;
+function analysis(timestamp) {
   //required for request
   var options = {
     uri: 'https://ttgs.mybluemix.net/hit',
     method: 'POST',
+    'Content-Type': 'application/json',
     json: {
-      "hitTime":payloaddata.Microphone.hittime,
+      "hitTime":timestamp,
       "seqCount":count,
       "sourceSensor":"mic"
     }
   };
 
+  count++;
+
   request(options, function(error, response, body){
       if (error || response.statusCode != 200){
-        console.log("error sending to game sequence analyzer");
+        console.log("error sending to game sequence analyzer: " + response.statusCode);
       } else if(response){
         console.log("Succeeded with: " + response.statusCode);
-        count++;
       }
   });
 }
