@@ -58,8 +58,8 @@ appClient.on("connect", function () {
  * captures the device events, aka. temperature readings, periodically and stores
  * them in the cloudant database.
  */
- var buffer = new Array();
- var currentlyInBuffer = new Array();
+ var buffer = [];
+ var currentlyInBuffer = [];
  appClient.on("deviceEvent", function (deviceType, deviceId, eventType, format, payload, topic) {
 
     console.log("Device Event from :: "+deviceType+" : "+deviceId+" of event "+eventType+" with payload : "+payload);
@@ -71,19 +71,24 @@ appClient.on("connect", function () {
         var micId = payloaddata.Id.microphoneId;
         var amplitude = payloaddata.Microphone.stream;
 
-        if (currentlyInBuffer.indexOf([timestamp / 10]) > -1) {
-          buffer[currentlyInBuffer.indexOf([timestamp / 10])] = [];
-          buffer[currentlyInBuffer.indexOf([timestamp / 10])][micId] = amplitude;
-          if (buffer[currentlyInBuffer.indexOf([timestamp / 10])].length >= 3) {
+        var indexOfTimeStamp = currentlyInBuffer.indexOf([timestamp / 10]);
+
+        if (indexOfTimeStamp > -1) {
+          buffer[indexOfTimeStamp][micId] = amplitude;
+          if (buffer[indexOfTimeStamp].length >= 4) {
             // Go to analysis
-            analysis(timestamp);
-            buffer.splice(buffer.indexOf([timestamp / 10]), 1);
+            analysis(timestamp, buffer[indexOfTimeStamp]);
+            buffer.splice(indexOfTimeStamp, 1);
+            currentlyInBuffer.splice(indexOfTimeStamp, 1);
           }
         }
         else {
           // analysis(timestamp);
           if (buffer.length >= 5) {
             // Buffer full, delete first entry
+            if (buffer[0].length >= 3) {
+              analysis(timestamp, buffer[0]);
+            }
             buffer.splice(0, 1);
             currentlyInBuffer.splice(0, 1);
           }
@@ -113,8 +118,10 @@ appClient.on("connect", function () {
     }
 });
 
+console.log(JSON.stringify(buffer));
+
 var count = 0;
-function analysis(timestamp) {
+function analysis(timestamp, micInput) {
   //required for request
   var options = {
     uri: 'https://ttgs.mybluemix.net/hit',
@@ -127,9 +134,21 @@ function analysis(timestamp) {
     }
   };
 
+  var leftOrRight = isLeftOrRight(micInput);
+  if (leftOrRight !== 0) {
+    options.json.leftOrRight = leftOrRight;
+
+    var tableSide = whichTableSide(micInput, leftOrRight);
+    if (tableSide) {
+      options.json.tableField = tableSide;
+    }
+  }
+
   count++;
 
-  request(options, function(error, response, body){
+  console.log('Output: ' + JSON.stringify(options.json));
+
+  request(options, function(error, response, body) {
       if (error || response.statusCode != 200){
         console.log("error sending to game sequence analyzer: " + response.statusCode);
       } else if(response){
@@ -138,6 +157,66 @@ function analysis(timestamp) {
   });
 }
 
+function isLeftOrRight(micInput) {
+  if (micInput[0] && micInput[1]) {
+    if (micInput[0] > micInput[1]) {
+      leftOrRight = 'left';
+    }
+    else {
+      leftOrRight = 'right';
+    }
+  }
+
+  if (micInput[2] && micInput[3]) {
+    if (!leftOrRight) {
+      if (micInput[2] > micInput[3]) {
+        leftOrRight = 'left';
+      }
+      else {
+        leftOrRight = 'right';
+      }
+    }
+    else {
+      if (micInput[2] > micInput[3] && leftOrRight === 'left') {
+        leftOrRight = 'left';
+      }
+      else if (leftOrRight === 'right') {
+        leftOrRight = 'right';
+      }
+      else {
+        leftOrRight = 0;
+      }
+    }
+  }
+
+  return leftOrRight;
+}
+
+function whichTableSide(micInput, side) {
+  var tableSide;
+  var left;
+  var right;
+
+  if (side === 'left') {
+    left = 0;
+    right = 2;
+  }
+  else {
+    left = 3;
+    right = 1;
+  }
+
+  if (micInput[left] && micInput[right]) {
+    if (micInput[left] > micInput[right]) {
+      tableSide = left;
+    }
+    else {
+      tableSide = right;
+    }
+  }
+  return tableSide;
+}
+
 appClient.on("deviceStatus", function (deviceType, deviceId, payload, topic) {
-    console.log("Device status from :: "+deviceType+" : "+deviceId+" with payload : "+payload);
+    // console.log("Device status from :: "+deviceType+" : "+deviceId+" with payload : "+payload);
 });
